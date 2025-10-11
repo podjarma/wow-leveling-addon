@@ -1,0 +1,8 @@
+## Interface: 30300
+## Title: Leveling Tracker
+## Notes: Placeholder, idk what i must write here.
+## Author: podjarma
+## Version: 1.0
+## SavedVariables: LevelStatDB
+
+Leveling.lua
