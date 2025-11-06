@@ -17,10 +17,12 @@ local oldLevelMaxXP = UnitXPMax("player")
 local totalGainedXP = 0
 local lastXpGainFlag = 0
 
+
 -- Создаем фрейм для отображения времени
 local statFrame = CreateFrame("Frame", nil, UIParent)
 statFrame:SetSize(240, 120)
 statFrame:SetPoint("CENTER", 0, 0) -- Временная позиция, будет обновлена при инициализации
+
 
 statFrame:SetBackdrop({
     bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
@@ -29,11 +31,13 @@ statFrame:SetBackdrop({
 })
 statFrame:SetBackdropColor(0, 0, 0, 0.8)
 
+
 -- Текст уровня
 local levelText = statFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 levelText:SetPoint("TOPLEFT", 10, -10)
 levelText:SetText("Уровень: ...")
 levelText:SetJustifyH("LEFT")
+
 
 -- Текст времени
 local timeText = statFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -41,11 +45,13 @@ timeText:SetPoint("TOPLEFT", levelText, "BOTTOMLEFT", 0, -5)
 timeText:SetText("Время: 00:00:00")
 timeText:SetJustifyH("LEFT")
 
+
 -- Текст убитых мобов
 local mobKillText = statFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 mobKillText:SetPoint("TOPLEFT", timeText, "BOTTOMLEFT", 0, -5)
 mobKillText:SetText("Мобов: 0")
 mobKillText:SetJustifyH("LEFT")
+
 
 -- Текст XP за мобов
 local mobXpGainText = statFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -53,17 +59,20 @@ mobXpGainText:SetPoint("TOPLEFT", mobKillText, "BOTTOMLEFT", 0, -5)
 mobXpGainText:SetText("XP мобы: 0")
 mobXpGainText:SetJustifyH("LEFT")
 
+
 -- Текст выполненных квестов
 local questDoneText = statFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 questDoneText:SetPoint("TOPLEFT", mobXpGainText, "BOTTOMLEFT", 0, -5)
 questDoneText:SetText("Квестов: 0")
 questDoneText:SetJustifyH("LEFT")
 
+
 -- Текст XP за выполненные квесты
 local questXpGainText = statFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 questXpGainText:SetPoint("TOPLEFT", questDoneText, "BOTTOMLEFT", 0, -5)
 questXpGainText:SetText("XP квесты: 0")
 questXpGainText:SetJustifyH("LEFT")
+
 
 -- Функция инициализации данных из БД
 local function InitializeData()
@@ -147,6 +156,7 @@ local function InitializeData()
     UpdateStat()
 end
 
+
 -- Функция форматирования времени
 local function FormatTime(seconds)
     local hours = math.floor(seconds / 3600)
@@ -154,6 +164,7 @@ local function FormatTime(seconds)
     local secs = math.floor(seconds % 60)
     return string.format("%02d:%02d:%02d", hours, minutes, secs)
 end
+
 
 -- Функция смены уровня
 local function ChangeLevel(newLevel)
@@ -173,12 +184,10 @@ local function ChangeLevel(newLevel)
             -- Это опыт от квеста
             currentLevelStats.questDone = (currentLevelStats.questDone or 0) + 1
             currentLevelStats.questXpGain = (currentLevelStats.questXpGain or 0) + lastGainedXP
-            DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00LevelTime: Последний XP от квеста перед уровнем: " .. lastGainedXP .. "|r")
         else
             -- Это опыт от моба
             currentLevelStats.mobXpGain = (currentLevelStats.mobXpGain or 0) + lastGainedXP
             currentLevelStats.mobKills = (currentLevelStats.mobKills or 0) + 1
-            DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00LevelTime: Последний XP от моба перед уровнем: " .. lastGainedXP .. "|r")
         end
         
         -- Сохраняем изменения
@@ -193,11 +202,6 @@ local function ChangeLevel(newLevel)
     local excessXP = 0
     if totalGainedXP > oldLevelMaxXP then
         excessXP = totalGainedXP - oldLevelMaxXP
-        DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00LevelTime: Общий полученный опыт: " .. totalGainedXP .. "|r")
-        DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00LevelTime: Макс. опыт для уровня " .. currentLevel .. ": " .. oldLevelMaxXP .. "|r")
-        DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00LevelTime: Избыточный опыт: " .. excessXP .. "|r")
-    else
-        DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00LevelTime: ИЗБЫТКА НЕТ! Общий опыт: " .. totalGainedXP .. ", Требуемый опыт: " .. oldLevelMaxXP .. "|r")
     end
     
     -- Сохраняем итоговое время для текущего уровня
@@ -222,10 +226,6 @@ local function ChangeLevel(newLevel)
             timestamp = currentTime,
             completed = true
         }
-        
-        DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00LevelTime: Завершен уровень " .. currentLevel .. 
-            ", время: " .. FormatTime(currentLevelStats.timeSpent) .. 
-            ", получено опыта: " .. totalGainedXP .. "|r")
     end
     
     -- Переходим на новый уровень
@@ -249,7 +249,6 @@ local function ChangeLevel(newLevel)
             lastXP = 0,  -- Начинаем с 0 на новом уровне
             maxXP = newLevelMaxXP
         }
-        DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00LevelTime: Начат новый уровень " .. newLevel .. "|r")
     else
         -- Если уровень уже был, восстанавливаем его данные
         if not playerDB.statsByLevel[newLevel].timeSpent then
@@ -261,7 +260,6 @@ local function ChangeLevel(newLevel)
         if not playerDB.statsByLevel[newLevel].maxXP then
             playerDB.statsByLevel[newLevel].maxXP = newLevelMaxXP
         end
-        DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00LevelTime: Возврат на уровень " .. newLevel .. "|r")
     end
     
     currentLevelStats = playerDB.statsByLevel[newLevel]
@@ -270,10 +268,8 @@ local function ChangeLevel(newLevel)
     if excessXP > 0 then
         if lastXpGainFlag then
             currentLevelStats.mobXpGain = (currentLevelStats.mobXpGain or 0) + excessXP
-            DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00LevelTime: Избыточный опыт " .. excessXP .. " перенесен на уровень " .. newLevel .. "|r")
         elseif not lastXpGainFlag then
             currentLevelStats.questXpGain = (currentLevelStats.questXpGain or 0) + excessXP
-            DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00LevelTime: Избыточный опыт " .. excessXP .. " перенесен на уровень " .. newLevel .. "|r")
         end 
     end
     
@@ -285,6 +281,7 @@ local function ChangeLevel(newLevel)
     UpdateStat()
     ForceSaveData() -- Сохраняем изменения
 end
+
 
 -- Функция обновления статистики
 local function UpdateStat()
@@ -338,26 +335,6 @@ local function UpdateStat()
     end
 end
 
--- -- Таймер обновления
--- local timer = statFrame:CreateAnimationGroup()
--- timer:SetLooping("REPEAT")
--- local anim = timer:CreateAnimation()
--- anim:SetDuration(1)
--- timer:SetScript("OnLoop", UpdateStat)
-
--- -- Функции управления таймером
--- local function StartTimer()
---     if not timer:IsPlaying() then
---         timer:Play()
---     end
--- end
-
--- local function StopTimer()
---     if timer:IsPlaying() then
---         timer:Stop()
---     end
--- end
-
 -- Таймер обновления (исправленная версия)
 local lastUpdate = 0
 statFrame:SetScript("OnUpdate", function(self, elapsed)
@@ -368,14 +345,17 @@ statFrame:SetScript("OnUpdate", function(self, elapsed)
     end
 end)
 
+
 -- Функции управления таймером (для совместимости оставляем пустые функции)
 local function StartTimer()
     -- Не нужно ничего делать, так как OnUpdate работает автоматически
 end
 
+
 local function StopTimer()
     -- Не нужно ничего делать, так как OnUpdate работает автоматически
 end
+
 
 -- === СОХРАНЕНИЕ ПОЗИЦИИ ===
 local function SaveFramePosition()
@@ -391,6 +371,7 @@ local function SaveFramePosition()
         y = y
     }
 end
+
 
 -- Функция принудительного сохранения данных
 local function ForceSaveData()
@@ -428,6 +409,7 @@ local function ForceSaveData()
     SaveFramePosition()
 end
 
+
 -- Функция обработки опыта за мобов
 local function ProcessMobXP(gainedXP)
     if not isInitialized or gainedXP <= 0 or not currentLevelStats then
@@ -437,10 +419,10 @@ local function ProcessMobXP(gainedXP)
     lastXpGainFlag = true
     currentLevelStats.mobXpGain = (currentLevelStats.mobXpGain or 0) + gainedXP
     currentLevelStats.mobKills = (currentLevelStats.mobKills or 0) + 1
-    DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00LevelTime: Моб убит! Опыт: " .. gainedXP .. " | Всего мобов: " .. currentLevelStats.mobKills .. "|r")
     UpdateStat()
     ForceSaveData()
 end
+
 
 -- Функция обработки опыта за квесты
 local function ProcessQuestXP(gainedXP)
@@ -451,10 +433,10 @@ local function ProcessQuestXP(gainedXP)
     lastXpGainFlag = false
     currentLevelStats.questDone = (currentLevelStats.questDone or 0) + 1
     currentLevelStats.questXpGain = (currentLevelStats.questXpGain or 0) + gainedXP
-    DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00LevelTime: Опыт за квест: " .. gainedXP .. " | Всего: " .. currentLevelStats.questXpGain .. "|r")
     UpdateStat()
     ForceSaveData()
 end
+
 
 -- Обработка событий
 local eventFrame = CreateFrame("Frame")
@@ -465,6 +447,7 @@ eventFrame:RegisterEvent("PLAYER_LOGOUT")
 eventFrame:RegisterEvent("PLAYER_XP_UPDATE")
 eventFrame:RegisterEvent("CHAT_MSG_SYSTEM")
 eventFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+
 
 eventFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_LEVEL_UP" then
@@ -511,7 +494,6 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         end
         StopTimer()
         ForceSaveData() -- Сохраняем данные перед выходом
-        DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00LevelTime: Выход из мира - данные сохранены|r")
         
     elseif event == "PLAYER_LOGOUT" then
         if not isInitialized then
@@ -519,7 +501,6 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         end
         StopTimer()
         ForceSaveData() -- Сохраняем данные перед выходом
-        DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00LevelTime: Выход из игры - данные сохранены|r")
         
     elseif event == "PLAYER_XP_UPDATE" then
         if not isInitialized then
@@ -537,11 +518,9 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             if currentTime - lastSystemMessageTime < 2 then -- В течение 2 секунд
                 -- Это опыт от квеста
                 ProcessQuestXP(gainedXP)
-                DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00LevelTime: XP от квеста (по времени): " .. gainedXP .. "|r")
             else
                 -- Это опыт от моба
                 ProcessMobXP(gainedXP)
-                DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00LevelTime: XP от моба: " .. gainedXP .. "|r")
             end
         end
         
@@ -562,7 +541,6 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             
             -- Устанавливаем временную метку для следующего XP_UPDATE
             lastSystemMessageTime = GetTime()
-            DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00LevelTime: Обнаружено системное сообщение о квесте|r")
         end
         
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
@@ -577,13 +555,13 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             -- Игрок убил моба
             if currentLevelStats then
                 currentLevelStats.mobKills = (currentLevelStats.mobKills or 0) + 1
-                DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00LevelTime: Моб убит через combat log! Всего: " .. currentLevelStats.mobKills .. "|r")
                 UpdateStat()
                 ForceSaveData()
             end
         end
     end
 end)
+
 
 -- Перемещение
 statFrame:SetMovable(true)
