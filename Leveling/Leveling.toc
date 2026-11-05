@@ -1,9 +1,10 @@
-## Interface: 30300
+## Interface: 16001
 ## Title: Leveling Tracker
-## Notes: Placeholder, idk what i must write here.
+## Notes: Статистика прокачки для WoW Forever
 ## Author: podjarma
-## Version: 1.0
-
+## Version: 1.1.0
 ## SavedVariables: LevelStatDB
+## AllowLoadGameType: forever, camelot
+## ExcludeLoadGameType: standard, classic
 
 Leveling.lua

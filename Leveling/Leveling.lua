@@ -1,5 +1,7 @@
--- Leveling Tracker для WoW 3.3.5
--- Отслеживает статистику прокачки персонажа
+-- Leveling Tracker для WoW Forever (Interface 16001)
+-- Отслеживает статистику прокачки персонажа.
+-- На Forever аддонам не приходит журнал боя, поэтому убийства считаются по приросту опыта,
+-- а опыт квестов отделяется событием QUEST_TURNED_IN.
 
 -- Глобальные переменные (будут инициализированы в PLAYER_ENTERING_WORLD)
 local playerName
@@ -10,16 +12,20 @@ local currentLevel
 local currentLevelStats
 local lastXP
 local xpBuffer = {}
-local lastSystemMessageTime = 0
 local sessionStartTime
 local isInitialized = false
-local oldLevelMaxXP = UnitXPMax("player")
+local oldLevelMaxXP = 0
 local totalGainedXP = 0
-local lastXpGainFlag = 0
+local lastXpGainFlag = true
+local pendingQuestCount = 0
+local pendingQuestTime = 0
+local FlushXP
+local UpdateStat
+local ForceSaveData
 
 
 -- Создаем фрейм для отображения времени
-local statFrame = CreateFrame("Frame", nil, UIParent)
+local statFrame = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
 statFrame:SetSize(240, 120)
 statFrame:SetPoint("CENTER", 0, 0) -- Временная позиция, будет обновлена при инициализации
 
@@ -74,6 +80,63 @@ questXpGainText:SetText("XP квесты: 0")
 questXpGainText:SetJustifyH("LEFT")
 
 
+-- Секретные значения Midnight/Forever нельзя складывать: такое сравнение роняет аддон.
+local function IsReadable(value)
+    if value == nil then
+        return false
+    end
+    if type(canaccessvalue) == "function" then
+        local ok, allowed = pcall(canaccessvalue, value)
+        if ok then
+            return not not allowed
+        end
+    end
+    if type(issecretvalue) == "function" then
+        local ok, secret = pcall(issecretvalue, value)
+        if ok and secret then
+            return false
+        end
+    end
+    return type(value) == "number" or type(value) == "string"
+end
+
+
+local function PlayerXP()
+    if type(UnitXP) ~= "function" then
+        return nil
+    end
+    local ok, value = pcall(UnitXP, "player")
+    if not ok or not IsReadable(value) or type(value) ~= "number" then
+        return nil
+    end
+    return value
+end
+
+
+local function PlayerXPMax()
+    if type(UnitXPMax) ~= "function" then
+        return nil
+    end
+    local ok, value = pcall(UnitXPMax, "player")
+    if not ok or not IsReadable(value) or type(value) ~= "number" then
+        return nil
+    end
+    return value
+end
+
+
+local function RememberMaxXP()
+    local maxXP = PlayerXPMax()
+    if not maxXP or maxXP <= 0 then
+        return
+    end
+    oldLevelMaxXP = maxXP
+    if currentLevelStats then
+        currentLevelStats.maxXP = maxXP
+    end
+end
+
+
 -- Функция инициализации данных из БД
 local function InitializeData()
     if isInitialized then
@@ -115,7 +178,7 @@ local function InitializeData()
             questDone = 0,
             questXpGain = 0,
             timeSpent = 0,
-            lastXP = UnitXP("player"), -- Сохраняем последний XP для отслеживания изменений
+            lastXP = PlayerXP() or 0, -- Сохраняем последний XP для отслеживания изменений
             finalStats = nil -- Финальные результаты (будут заполнены при завершении уровня)
         }
         currentLevelStats = playerDB.statsByLevel[currentLevel]
@@ -128,12 +191,13 @@ local function InitializeData()
         end
         -- Восстанавливаем lastXP, если он есть, иначе используем текущий
         if not currentLevelStats.lastXP then
-            currentLevelStats.lastXP = UnitXP("player")
+            currentLevelStats.lastXP = PlayerXP() or 0
         end
     end
     
     -- Восстанавливаем сохраненное значение lastXP
-    lastXP = currentLevelStats.lastXP or UnitXP("player")
+    lastXP = currentLevelStats.lastXP or PlayerXP() or 0
+    RememberMaxXP()
         
     -- Восстанавливаем время начала сессии
     sessionStartTime = GetTime()
@@ -172,36 +236,39 @@ local function ChangeLevel(newLevel)
         return
     end
     
-    -- Сначала обрабатываем последний опыт, который привел к повышению уровня
-    local currentXP = UnitXP("player")
-    local lastGainedXP = currentXP - lastXP
-    
-    if lastGainedXP > 0 then
-        local currentTime = GetTime()
-        
-        -- Проверяем, было ли недавно системное сообщение о квесте
-        if currentTime - lastSystemMessageTime < 2 then
-            -- Это опыт от квеста
-            currentLevelStats.questDone = (currentLevelStats.questDone or 0) + 1
-            currentLevelStats.questXpGain = (currentLevelStats.questXpGain or 0) + lastGainedXP
-        else
-            -- Это опыт от моба
-            currentLevelStats.mobXpGain = (currentLevelStats.mobXpGain or 0) + lastGainedXP
-            currentLevelStats.mobKills = (currentLevelStats.mobKills or 0) + 1
+    -- Опыт, ещё не разложенный по мобам и квестам, остаётся на завершаемом уровне.
+    if FlushXP then
+        FlushXP(true)
+    end
+
+    local currentXP = PlayerXP()
+    if currentXP and IsReadable(lastXP) and type(lastXP) == "number" then
+        local lastGainedXP = currentXP - lastXP
+        if lastGainedXP > 0 then
+            xpBuffer[#xpBuffer + 1] = { amount = lastGainedXP, time = GetTime() }
+            lastXP = currentXP
+            if currentLevelStats then
+                currentLevelStats.lastXP = currentXP
+            end
+            if FlushXP then
+                FlushXP(true)
+            end
         end
-        
-        -- Сохраняем изменения
-        ForceSaveData()
     end
     
     -- Теперь вычисляем общий полученный опыт на текущем уровне (уже с последним опытом)
     local totalGainedXP = (currentLevelStats.mobXpGain or 0) + (currentLevelStats.questXpGain or 0)
-    local oldLevelMaxXP = UnitXPMax("player") -- Получаем maxXP ДО повышения уровня
+    local levelMaxXP = 0
+    if IsReadable(oldLevelMaxXP) and type(oldLevelMaxXP) == "number" and oldLevelMaxXP > 0 then
+        levelMaxXP = oldLevelMaxXP
+    elseif currentLevelStats and type(currentLevelStats.maxXP) == "number" then
+        levelMaxXP = currentLevelStats.maxXP
+    end
     
     -- Вычисляем избыточный опыт
     local excessXP = 0
-    if totalGainedXP > oldLevelMaxXP then
-        excessXP = totalGainedXP - oldLevelMaxXP
+    if levelMaxXP > 0 and totalGainedXP > levelMaxXP then
+        excessXP = totalGainedXP - levelMaxXP
     end
     
     -- Сохраняем итоговое время для текущего уровня
@@ -221,7 +288,7 @@ local function ChangeLevel(newLevel)
             questDone = currentLevelStats.questDone or 0,
             questXpGain = currentLevelStats.questXpGain or 0,
             totalXP = totalGainedXP,
-            maxXP = oldLevelMaxXP,
+            maxXP = levelMaxXP,
             excessXP = excessXP,
             timestamp = currentTime,
             completed = true
@@ -236,7 +303,8 @@ local function ChangeLevel(newLevel)
     sessionStartTime = currentTime
     
     -- Получаем maxXP для нового уровня
-    local newLevelMaxXP = UnitXPMax("player")
+    local newLevelMaxXP = PlayerXPMax() or 0
+    oldLevelMaxXP = newLevelMaxXP
     
     -- Инициализируем статистику нового уровня
     if not playerDB.statsByLevel[newLevel] then
@@ -277,14 +345,15 @@ local function ChangeLevel(newLevel)
     lastXP = 0
     currentLevelStats.lastXP = 0
     
-    lastSystemMessageTime = 0 -- Сбрасываем временную метку
+    pendingQuestCount = 0
+    pendingQuestTime = 0
     UpdateStat()
     ForceSaveData() -- Сохраняем изменения
 end
 
 
 -- Функция обновления статистики
-local function UpdateStat()
+function UpdateStat()
     -- Показываем начальные значения, даже если данные еще не инициализированы
     if not isInitialized or not currentLevelStats or not currentLevel then
         if levelText then
@@ -338,6 +407,9 @@ end
 -- Таймер обновления (исправленная версия)
 local lastUpdate = 0
 statFrame:SetScript("OnUpdate", function(self, elapsed)
+    if FlushXP then
+        FlushXP(false)
+    end
     lastUpdate = lastUpdate + elapsed
     if lastUpdate >= 1 then
         UpdateStat()
@@ -374,7 +446,7 @@ end
 
 
 -- Функция принудительного сохранения данных
-local function ForceSaveData()
+function ForceSaveData()
     if not isInitialized then
         return
     end
@@ -425,16 +497,59 @@ end
 
 
 -- Функция обработки опыта за квесты
-local function ProcessQuestXP(gainedXP)
+local function ProcessQuestXP(gainedXP, count)
     if not isInitialized or gainedXP <= 0 or not currentLevelStats then
         return
     end
     
     lastXpGainFlag = false
-    currentLevelStats.questDone = (currentLevelStats.questDone or 0) + 1
+    currentLevelStats.questDone = (currentLevelStats.questDone or 0) + (count or 1)
     currentLevelStats.questXpGain = (currentLevelStats.questXpGain or 0) + gainedXP
     UpdateStat()
     ForceSaveData()
+end
+
+
+local function TakeQuestCount(entryTime, now)
+    if pendingQuestCount <= 0 then
+        return 0
+    end
+    if (now - pendingQuestTime) > 2 then
+        pendingQuestCount = 0
+        pendingQuestTime = 0
+        return 0
+    end
+    -- Сдача квеста на Forever может прийти чуть раньше или позже прироста опыта.
+    if pendingQuestTime < (entryTime - 2) or pendingQuestTime > (entryTime + 2) then
+        return 0
+    end
+    local count = pendingQuestCount
+    pendingQuestCount = 0
+    pendingQuestTime = 0
+    return count
+end
+
+
+FlushXP = function(force)
+    if not isInitialized or not currentLevelStats then
+        return
+    end
+    local now = GetTime()
+    local index = 1
+    while index <= #xpBuffer do
+        local entry = xpBuffer[index]
+        if force or (now - entry.time) >= 0.4 then
+            table.remove(xpBuffer, index)
+            local questCount = TakeQuestCount(entry.time, now)
+            if questCount > 0 then
+                ProcessQuestXP(entry.amount, questCount)
+            else
+                ProcessMobXP(entry.amount)
+            end
+        else
+            index = index + 1
+        end
+    end
 end
 
 
@@ -445,8 +560,7 @@ eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterEvent("PLAYER_LEAVING_WORLD")
 eventFrame:RegisterEvent("PLAYER_LOGOUT")
 eventFrame:RegisterEvent("PLAYER_XP_UPDATE")
-eventFrame:RegisterEvent("CHAT_MSG_SYSTEM")
-eventFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+eventFrame:RegisterEvent("QUEST_TURNED_IN")
 
 
 eventFrame:SetScript("OnEvent", function(self, event, ...)
@@ -462,7 +576,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         -- Инициализируем данные из БД при входе в мир
         InitializeData()
 
-        oldLevelMaxXP = UnitXPMax("player")
+        RememberMaxXP()
         
         if not isInitialized then
             return
@@ -476,7 +590,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             if currentLevelStats and currentLevelStats.lastXP then
                 lastXP = currentLevelStats.lastXP
             else
-                lastXP = UnitXP("player")
+                lastXP = PlayerXP() or 0
                 if currentLevelStats then
                     currentLevelStats.lastXP = lastXP
                 end
@@ -502,63 +616,43 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         StopTimer()
         ForceSaveData() -- Сохраняем данные перед выходом
         
+    elseif event == "QUEST_TURNED_IN" then
+        if not isInitialized then
+            return
+        end
+        local _, xpReward = ...
+        if IsReadable(xpReward) and type(xpReward) == "number" and xpReward <= 0 then
+            return
+        end
+        pendingQuestCount = pendingQuestCount + 1
+        pendingQuestTime = GetTime()
+        
     elseif event == "PLAYER_XP_UPDATE" then
         if not isInitialized then
             return
         end
         
-        local currentXP = UnitXP("player")
-        local gainedXP = currentXP - lastXP
-        
-        -- Обрабатываем только положительный прирост опыта и только если не превышен лимит уровня
-        if gainedXP > 0 then
-            local currentTime = GetTime()
-            
-            -- Проверяем, было ли недавно системное сообщение о квесте
-            if currentTime - lastSystemMessageTime < 2 then -- В течение 2 секунд
-                -- Это опыт от квеста
-                ProcessQuestXP(gainedXP)
-            else
-                -- Это опыт от моба
-                ProcessMobXP(gainedXP)
-            end
-        end
-        
-        lastXP = currentXP
-        
-    elseif event == "CHAT_MSG_SYSTEM" then
-        if not isInitialized then
+        local currentXP = PlayerXP()
+        if not currentXP then
             return
         end
-        
-        local message = select(1, ...)
-        
-        -- Обработка системных сообщений об опыте за квесты
-        if string.find(message, "Опыт выполнения задания:") or 
-           string.find(message, "Получено опыта:") or
-           string.find(message, "Получено:") or
-           string.find(message, "Experience gained:") then
-            
-            -- Устанавливаем временную метку для следующего XP_UPDATE
-            lastSystemMessageTime = GetTime()
-        end
-        
-    elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
-        if not isInitialized then
-            return
-        end
-        -- Дополнительная проверка через combat log для более точного отслеживания мобов
-        local timestamp, subevent, hideCaster, sourceGUID, sourceName, sourceFlags, sourceRaidFlags, 
-              destGUID, destName, destFlags, destRaidFlags = CombatLogGetCurrentEventInfo()
-        
-        if subevent == "PARTY_KILL" and sourceGUID == UnitGUID("player") then
-            -- Игрок убил моба
+        if not IsReadable(lastXP) or type(lastXP) ~= "number" then
+            lastXP = currentXP
             if currentLevelStats then
-                currentLevelStats.mobKills = (currentLevelStats.mobKills or 0) + 1
-                UpdateStat()
-                ForceSaveData()
+                currentLevelStats.lastXP = currentXP
             end
+            return
         end
+
+        local gainedXP = currentXP - lastXP
+        if gainedXP > 0 then
+            xpBuffer[#xpBuffer + 1] = { amount = gainedXP, time = GetTime() }
+        end
+        lastXP = currentXP
+        if currentLevelStats then
+            currentLevelStats.lastXP = currentXP
+        end
+        RememberMaxXP()
     end
 end)
 
@@ -602,8 +696,8 @@ SlashCmdList["LEVELTIME"] = function(msg)
             return
         end
         DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00=== LevelTime Debug ===|r")
-        DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00Текущий XP:|r " .. UnitXP("player"))
-        DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00Последний XP:|r " .. lastXP)
+        DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00Текущий XP:|r " .. tostring(PlayerXP()))
+        DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00Последний XP:|r " .. tostring(lastXP))
         DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00Уровень:|r " .. currentLevel)
         if currentLevelStats then
             local currentTime = GetTime()
